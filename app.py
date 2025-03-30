@@ -1,119 +1,191 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import numpy as np
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
+from io import StringIO
 
 st.set_page_config(layout="wide")
-st.title("📊 Options Gamma Dashboard")
+st.title("📊 Options Data Dashboard")
 
+# Function to calculate Gamma Flip
+def calculate_gamma_flip(df):
+    """
+    Calculates the Gamma Flip point, handling potential edge cases.
+
+    Args:
+        df (pd.DataFrame): DataFrame with 'Strike' and 'gamma' columns.
+
+    Returns:
+        float: The strike price where Gamma flips, or None if not found.
+    """
+    df_sorted = df.sort_values(by='Strike')
+    gamma_values = df_sorted['gamma'].values
+    strike_values = df_sorted['Strike'].values
+
+    # Find the first index where Gamma changes sign
+    flip_index = np.where(np.diff(np.sign(gamma_values)))[0]
+    if len(flip_index) > 0:
+        # Get the strike value at the flip index
+        return strike_values[flip_index[0]]
+    else:
+        return None
+
+# Function to create ThinkScript overlay
+def create_thinkscript_overlay(gamma_flip, put_wall, call_wall):
+    """
+    Generates a ThinkScript overlay for key levels.
+
+    Args:
+        gamma_flip (float): Gamma Flip strike price.
+        put_wall (float): Put Wall strike price.
+        call_wall (float): Call Wall strike price.
+
+    Returns:
+        str: ThinkScript code for the overlay.
+    """
+    thinkscript = """
+plot GammaFlip = %s;
+GammaFlip.SetDefaultColor(Color.YELLOW);
+plot PutWall = %s;
+PutWall.SetDefaultColor(Color.RED);
+plot CallWall = %s;
+CallWall.SetDefaultColor(Color.GREEN);
+    """ % (gamma_flip, put_wall, call_wall)
+    return thinkscript
+
+# Function to export Gamma key levels as CSV
+def export_gamma_levels_csv(gamma_flip, put_wall, call_wall):
+    """
+    Generates a CSV string of Gamma key levels.
+
+    Args:
+        gamma_flip (float): Gamma Flip strike price.
+        put_wall (float): Put Wall strike price.
+        call_wall (float): Call Wall strike price.
+
+    Returns:
+        str: CSV formatted string.
+    """
+    data = {
+        'Level': ['Gamma Flip', 'Put Wall', 'Call Wall'],
+        'Strike': [gamma_flip, put_wall, call_wall]
+    }
+    df = pd.DataFrame(data)
+    return df.to_csv(index=False)
+
+# Upload file
 uploaded_file = st.file_uploader("Upload Options Chain Excel File (.xlsx)", type="xlsx")
 
 if uploaded_file:
-    # Read headers from row 2 (index 1)
-    df = pd.read_excel(uploaded_file, header=1)
-    st.write("📄 Detected Columns:", df.columns.tolist())
+    # Read the raw data
+    df_raw = pd.read_excel(uploaded_file, header=None)
+    st.subheader("📄 Raw Preview")
+    st.write("First 20 Rows (no headers):")
+    st.dataframe(df_raw.head(20))
 
-    # Attempt to map and clean columns
+    # Read the header row
     try:
-        # Clean column names and handle missing columns
-        df.columns = df.columns.str.strip()  # Remove extra spaces
-        expected_columns = ["Gamma", "Impl Vol", "Open.Int", "Strike", "Expiration"]
-
-        # Check if all expected columns exist
-        for col in expected_columns:
-            if col not in df.columns:
-                st.error(f"⚠️ Column '{col}' is missing!")
-                raise KeyError(f"Missing expected column: {col}")
-
-        df = df[expected_columns]
-        df.columns = ["Gamma", "ImpliedVol", "OpenInterest", "Strike", "Expiration"]
-
-        # Clean the data: remove non-numeric values in numerical columns
-        df["Strike"] = pd.to_numeric(df["Strike"], errors="coerce")
-        df["Gamma"] = pd.to_numeric(df["Gamma"], errors="coerce")
-        df["OpenInterest"] = pd.to_numeric(df["OpenInterest"], errors="coerce")
-        df["ImpliedVol"] = df["ImpliedVol"].astype(str).str.replace('%', '')
-        df["ImpliedVol"] = pd.to_numeric(df["ImpliedVol"], errors="coerce")
-        df["Expiration"] = pd.to_datetime(df["Expiration"], errors="coerce")
-
-        # Drop rows with missing values in essential columns
-        df = df.dropna(subset=["Strike", "Gamma", "ImpliedVol", "Expiration"])
-        st.write("✅ Cleaned Data Preview", df.head(20))
-
-        # --- Gamma by Strike ---
-        st.subheader("Gamma by Strike")
-        gamma_by_strike = df.groupby("Strike")["Gamma"].sum().dropna().sort_index()
-        fig1, ax1 = plt.subplots(figsize=(10, 4))
-        ax1.bar(gamma_by_strike.index, gamma_by_strike.values, color='steelblue')
-        ax1.set_title("Net Gamma by Strike")
-        ax1.set_xlabel("Strike")
-        ax1.set_ylabel("Net Gamma")
-        st.pyplot(fig1)
-
-        # --- Gamma Flip ---
-        gamma_flip = None
-        for i in range(1, len(gamma_by_strike)):
-            if gamma_by_strike.iloc[i - 1] < 0 and gamma_by_strike.iloc[i] > 0:
-                x0, y0 = gamma_by_strike.index[i - 1], gamma_by_strike.iloc[i - 1]
-                x1, y1 = gamma_by_strike.index[i], gamma_by_strike.iloc[i]
-                gamma_flip = x0 - y0 * (x1 - x0) / (y1 - y0)
-                break
-
-        put_wall = gamma_by_strike.idxmin()
-        call_wall = gamma_by_strike.idxmax()
-
-        st.write("**Gamma Flip Zone:**", gamma_flip)
-        st.write("**Put Wall:**", put_wall)
-        st.write("**Call Wall:**", call_wall)
-
-        # --- Volatility Surface (3D) ---
-        st.subheader("Volatility Surface (3D)")
-        pivot = df.pivot_table(index="Strike", columns="Expiration", values="ImpliedVol")
-        X, Y = np.meshgrid(pivot.columns, pivot.index)
-        Z = pivot.values
-
-        fig2 = go.Figure(data=[go.Surface(z=Z, x=X, y=Y, colorscale='Viridis')])
-        fig2.update_layout(title='Implied Volatility Surface', scene=dict(
-            xaxis_title='Expiration',
-            yaxis_title='Strike',
-            zaxis_title='Implied Vol (%)'
-        ))
-        st.plotly_chart(fig2, use_container_width=True)
-
-        # --- Export Gamma Levels ---
-        st.subheader("Export Gamma Key Levels")
-        input_line = f"input gammaFlip = {gamma_flip:.2f};" if gamma_flip is not None else ""
-        plot_line = """plot GammaFlip = gammaFlip;
-GammaFlip.SetStyle(Curve.SHORT_DASH);
-GammaFlip.SetDefaultColor(Color.YELLOW);
-""" if gamma_flip is not None else ""
-
-        output = f"""
-# === GOOGL Gamma Overlay ===
-input putWall = {put_wall};
-input callWall = {call_wall};
-{input_line}
-
-plot PutWall = putWall;
-PutWall.SetStyle(Curve.LONG_DASH);
-PutWall.SetDefaultColor(Color.RED);
-
-plot CallWall = callWall;
-CallWall.SetStyle(Curve.LONG_DASH);
-CallWall.SetDefaultColor(Color.GREEN);
-
-{plot_line}
-"""
-
-        st.download_button("📥 Download ThinkScript", output, file_name="GOOGL_GammaOverlay.txt")
-
-        gamma_csv = pd.DataFrame({
-            "Level": ["Gamma Flip", "Put Wall", "Call Wall"],
-            "Strike": [gamma_flip, put_wall, call_wall]
-        })
-        csv = gamma_csv.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download CSV", csv, file_name="GOOGL_GammaLevels.csv", mime="text/csv")
-
+        df_header = pd.read_excel(uploaded_file, header=1, nrows=1)
+        st.write("Detected Column Names:")
+        detected_columns = df_header.columns.tolist()  # Store detected column names
+        st.write(detected_columns)
     except Exception as e:
-        st.error(f"⚠️ Error: {e}")
+        st.error(f"Failed to read headers from row 2: {e}")
+        return
+
+    # Load the data with headers set at row 2
+    df = pd.read_excel(uploaded_file, header=1)
+    st.subheader("📊 Cleaned Data Preview")
+
+    # 1. Print the actual column names in the DataFrame
+    st.write("Actual DataFrame Columns:")
+    st.write(df.columns.tolist())
+
+    # 2. Normalize column names (lowercase and remove spaces) for comparison and to handle variations
+    df.columns = df.columns.str.lower().str.replace(' ', '')
+    
+    # 3. Define the columns we want to keep (normalized)
+    required_columns = ['gamma', 'implvol', 'open.int.', 'strike', 'expiration']  # Added 'strike' and 'expiration'
+    
+    # 4. Drop rows with NaN in the required columns
+    try:
+        df = df.dropna(subset=required_columns)
+    except KeyError as e:
+        st.error(f"KeyError: {e}.  Please check the column names in your Excel file.  The application is expecting 'Gamma', 'Impl Vol', 'Open Int', 'Strike', and 'Expiration' (case-insensitive, spaces ignored).")
+        return # Stop processing if there is a KeyError
+
+    # 5. Ensure that the required columns are present *before* proceeding.
+    for col in required_columns:
+        if col not in df.columns:
+            st.error(f"Required column '{col}' not found.  Please check the column names in your Excel file.")
+            return
+
+    # Convert necessary columns to numeric, handling errors
+    df['gamma'] = pd.to_numeric(df['gamma'], errors='coerce')
+    df['implvol'] = pd.to_numeric(df['implvol'], errors='coerce')
+    df['open.int.'] = pd.to_numeric(df['open.int.'], errors='coerce')
+    df['strike'] = pd.to_numeric(df['strike'], errors='coerce')  # Convert 'Strike' to numeric
+
+
+    # Replace any remaining NaN values after conversion
+    df.fillna(0, inplace=True)
+
+    # Display cleaned dataframe preview
+    st.dataframe(df.head(20))
+
+    # Gamma Exposure by Strike
+    st.subheader("📈 Gamma Exposure by Strike")
+    try:
+        fig = px.scatter(df, x="strike", y="gamma", title="Gamma Exposure vs Strike")
+        st.plotly_chart(fig)
+    except Exception as e:
+        st.error(f"Error generating Gamma Exposure plot: {e}")
+
+    # Implied Volatility Surface (3D)
+    st.subheader("📉 Implied Volatility Surface")
+    try:
+        fig = px.scatter_3d(df, x="strike", y="expiration", z="implvol",
+                           size="open.int.", color="strike",
+                           title="Implied Volatility Surface (Strike, Expiration, Implied Volatility)")
+        st.plotly_chart(fig)
+    except Exception as e:
+        st.error(f"Error generating Implied Volatility Surface plot: {e}")
+
+    # Gamma Flip Visualization
+    st.subheader("🔄 Gamma Flip Visualization")
+    try:
+        gamma_flip = calculate_gamma_flip(df)  # Use the function
+        if gamma_flip is not None:
+            st.write(f"Gamma Flip is at Strike: {gamma_flip}")
+        else:
+            st.write("Gamma Flip not found.")
+    except Exception as e:
+        st.error(f"Error generating Gamma Flip visualization: {e}")
+
+    # Placeholder values for Put Wall and Call Wall (replace with actual calculations)
+    put_wall = 100  # Example value, replace with your calculation
+    call_wall = 120  # Example value, replace with your calculation
+
+    # Export ThinkOrSwim Script
+    st.subheader("🚀 Export ThinkOrSwim Script")
+    thinkscript_overlay = create_thinkscript_overlay(gamma_flip, put_wall, call_wall)
+    st.text_area("ThinkScript Overlay", value=thinkscript_overlay, height=200)
+    
+    # Add a download button
+    st.download_button(
+        label="Download ThinkScript",
+        data=thinkscript_overlay,
+        file_name="gamma_overlay.ts",
+        mime="text/plain",
+    )
+
+    # Export Gamma Key Levels as CSV
+    st.subheader("📊 Gamma Key Levels (CSV)")
+    gamma_levels_csv = export_gamma_levels_csv(gamma_flip, put_wall, call_wall)
+    st.dataframe(pd.read_csv(StringIO(gamma_levels_csv)))  # Display as DataFrame
+    st.download_button(
+        label="Download Gamma Levels CSV",
+        data=gamma_levels_csv,
+        file_name="gamma_levels.csv",
+        mime="text/csv",
+    )
