@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
 
 def clean_column(df, column_name):
     df[column_name] = df[column_name].astype(str).str.replace('%', '').apply(pd.to_numeric, errors='coerce')
@@ -21,20 +22,31 @@ def load_data(uploaded_file):
     return calls_data, puts_data
 
 def plot_gamma_exposure(calls, puts):
-    # Ensure that the data contains the required columns
+    # Plot for Calls
     if 'Strike' in calls.columns and 'Gamma' in calls.columns:
-        # Plot for Calls
         fig_calls = px.line(calls, x='Strike', y='Gamma', title="Gamma Exposure by Strike (Calls)")
         st.plotly_chart(fig_calls)
     else:
         st.error("The required columns ('Strike' and 'Gamma') are missing in the Calls data.")
     
+    # Plot for Puts
     if 'Strike' in puts.columns and 'Gamma' in puts.columns:
-        # Plot for Puts
         fig_puts = px.line(puts, x='Strike', y='Gamma', title="Gamma Exposure by Strike (Puts)")
         st.plotly_chart(fig_puts)
     else:
         st.error("The required columns ('Strike' and 'Gamma') are missing in the Puts data.")
+
+def plot_3d_visualization(calls, puts):
+    # Combine calls and puts data for 3D plot visualization
+    combined_data = pd.concat([calls, puts])
+    
+    # Plotting 3D visualization
+    if 'Strike' in combined_data.columns and 'Gamma' in combined_data.columns and 'Impl Vol' in combined_data.columns:
+        fig_3d = px.scatter_3d(combined_data, x='Strike', y='Gamma', z='Impl Vol',
+                               color='Impl Vol', title="3D Gamma Exposure Visualization")
+        st.plotly_chart(fig_3d)
+    else:
+        st.error("The required columns ('Strike', 'Gamma', and 'Impl Vol') are missing in the combined data for 3D visualization.")
 
 def main():
     st.title("Options Gamma Dashboard")
@@ -51,8 +63,11 @@ def main():
         st.write(calls_data.head())  # Preview the first few rows of Calls data
         st.write(puts_data.head())   # Preview the first few rows of Puts data
 
-        # Call the plotting function
+        # Call the plotting function for Gamma Exposure
         plot_gamma_exposure(calls_data, puts_data)
+        
+        # Call the plotting function for 3D Gamma Exposure visualization
+        plot_3d_visualization(calls_data, puts_data)
 
 if __name__ == "__main__":
     main()
