@@ -27,18 +27,14 @@ if uploaded_file:
     # Load the data with headers set at row 2
     df = pd.read_excel(uploaded_file, header=1)
     st.subheader("📊 Cleaned Data Preview")
-
+    
     # Clean data by removing or replacing NaN values
-    df = df.dropna(subset=['Gamma', 'Impl Vol', 'Open.Int.'])  # Drop rows with NaN in critical columns
+    df = df.dropna(subset=['Gamma', 'Impl Vol'])  # Drop rows with NaN in critical columns
     df['Gamma'] = pd.to_numeric(df['Gamma'], errors='coerce')  # Ensure Gamma is numeric
     df['Impl Vol'] = pd.to_numeric(df['Impl Vol'], errors='coerce')  # Ensure Impl Vol is numeric
-    df['Open.Int.'] = pd.to_numeric(df['Open.Int.'], errors='coerce')  # Ensure Open.Int is numeric
 
     # Replace any remaining NaN values after conversion
     df.fillna(0, inplace=True)
-
-    # Handle inf/-inf values
-    df['Open.Int.'].replace([np.inf, -np.inf], 1e10, inplace=True)
 
     # Display cleaned dataframe preview
     st.dataframe(df.head(20))
@@ -70,13 +66,6 @@ if uploaded_file:
     # Multi-Dimensional 3D Visualization
     st.subheader("🌐 Multi-Dimensional 3D Visualization")
     try:
-        # Debugging: Inspect Open.Int. column
-        st.write("Open.Int. column info:")
-        st.write(df['Open.Int.'].describe())  # Get descriptive statistics
-        st.write("Open.Int. data type:", df['Open.Int.'].dtype)
-        st.write("Unique values in Open.Int.:", df['Open.Int.'].unique())
-        st.write("Non-finite values:", df[~np.isfinite(df['Open.Int.'])])
-
         fig = px.scatter_3d(df, x="Strike", y="Gamma", z="Impl Vol", size="Open.Int.", color="Strike", title="3D Plot (Gamma, Implied Volatility, Open Interest)")
         st.plotly_chart(fig)
     except Exception as e:
