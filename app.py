@@ -1,73 +1,76 @@
-import streamlit as st
 import pandas as pd
 import plotly.express as px
-import numpy as np
+import streamlit as st
 
+# Load and clean the data
+def load_data(file):
+    df = pd.read_excel(file, header=1)
+    return df
+
+# Clean column names by stripping extra spaces and replacing symbols like '%'
 def clean_column(df, column_name):
     df[column_name] = df[column_name].astype(str).str.replace('%', '').apply(pd.to_numeric, errors='coerce')
     return df
 
-def load_data(uploaded_file):
-    # Load the file into pandas dataframe
-    df_raw = pd.read_excel(uploaded_file, header=1)  # Headers are now in the second row (index 1)
+# Plotting Gamma Exposure by Strike (with Calls and Puts)
+def plot_gamma_exposure(calls_data, puts_data):
+    # Gamma Exposure for Calls
+    fig_calls = px.line(calls_data, x="Strike", y="Gamma", title="Gamma Exposure by Strike (Calls)")
+
+    # Gamma Exposure for Puts
+    fig_puts = px.line(puts_data, x="Strike", y="Gamma", title="Gamma Exposure by Strike (Puts)")
+
+    # 4D Visualization for Calls: Using Volume as size and color
+    fig_calls_4d = px.scatter_3d(
+        calls_data, x="Strike", y="Gamma", z="Impl Vol",
+        color="Volume", size="Volume", title="Gamma Exposure in 4D (Calls)"
+    )
+    fig_calls_4d.update_traces(marker=dict(size=5))
+
+    # 4D Visualization for Puts: Using Volume as size and color
+    fig_puts_4d = px.scatter_3d(
+        puts_data, x="Strike", y="Gamma", z="Impl Vol",
+        color="Volume", size="Volume", title="Gamma Exposure in 4D (Puts)"
+    )
+    fig_puts_4d.update_traces(marker=dict(size=5))
+
+    # 5D Visualization: Adding Expiry Date (Exp) as Animation Frame
+    fig_calls_5d = px.scatter_3d(
+        calls_data, x="Strike", y="Gamma", z="Impl Vol",
+        color="Volume", animation_frame="Exp", title="Gamma Exposure by Strike (Calls) with Expiry"
+    )
+    fig_puts_5d = px.scatter_3d(
+        puts_data, x="Strike", y="Gamma", z="Impl Vol",
+        color="Volume", animation_frame="Exp", title="Gamma Exposure by Strike (Puts) with Expiry"
+    )
+
+    return fig_calls, fig_puts, fig_calls_4d, fig_puts_4d, fig_calls_5d, fig_puts_5d
+
+# Streamlit UI setup
+st.title("Options Gamma Dashboard")
+
+uploaded_file = st.file_uploader("Upload your options chain Excel file", type=["xlsx"])
+
+if uploaded_file:
+    df = load_data(uploaded_file)
     
-    # Clean the required columns
-    df_raw = clean_column(df_raw, "Gamma")
-    df_raw = clean_column(df_raw, "Impl Vol")
+    # Cleaning data
+    df = clean_column(df, "Gamma")
+    df = clean_column(df, "Impl Vol")
+    df = clean_column(df, "OI")
     
-    # Separate the data for calls and puts based on the "Strike" column
-    calls_data = df_raw[df_raw['Strike'] <= 100]  # Assuming calls have strikes less than or equal to 100
-    puts_data = df_raw[df_raw['Strike'] > 100]    # Assuming puts have strikes greater than 100
+    # Splitting data into Calls and Puts
+    calls_data = df[df["Strike"] <= df["Strike"].median()]
+    puts_data = df[df["Strike"] > df["Strike"].median()]
     
-    return calls_data, puts_data
-
-def plot_gamma_exposure(calls, puts):
-    # Plot for Calls
-    if 'Strike' in calls.columns and 'Gamma' in calls.columns:
-        fig_calls = px.line(calls, x='Strike', y='Gamma', title="Gamma Exposure by Strike (Calls)")
-        st.plotly_chart(fig_calls)
-    else:
-        st.error("The required columns ('Strike' and 'Gamma') are missing in the Calls data.")
+    # Plot Gamma Exposure
+    fig_calls, fig_puts, fig_calls_4d, fig_puts_4d, fig_calls_5d, fig_puts_5d = plot_gamma_exposure(calls_data, puts_data)
     
-    # Plot for Puts
-    if 'Strike' in puts.columns and 'Gamma' in puts.columns:
-        fig_puts = px.line(puts, x='Strike', y='Gamma', title="Gamma Exposure by Strike (Puts)")
-        st.plotly_chart(fig_puts)
-    else:
-        st.error("The required columns ('Strike' and 'Gamma') are missing in the Puts data.")
+    # Displaying the charts
+    st.plotly_chart(fig_calls)
+    st.plotly_chart(fig_puts)
+    st.plotly_chart(fig_calls_4d)
+    st.plotly_chart(fig_puts_4d)
+    st.plotly_chart(fig_calls_5d)
+    st.plotly_chart(fig_puts_5d)
 
-def plot_3d_visualization(calls, puts):
-    # Combine calls and puts data for 3D plot visualization
-    combined_data = pd.concat([calls, puts])
-    
-    # Plotting 3D visualization
-    if 'Strike' in combined_data.columns and 'Gamma' in combined_data.columns and 'Impl Vol' in combined_data.columns:
-        fig_3d = px.scatter_3d(combined_data, x='Strike', y='Gamma', z='Impl Vol',
-                               color='Impl Vol', title="3D Gamma Exposure Visualization")
-        st.plotly_chart(fig_3d)
-    else:
-        st.error("The required columns ('Strike', 'Gamma', and 'Impl Vol') are missing in the combined data for 3D visualization.")
-
-def main():
-    st.title("Options Gamma Dashboard")
-
-    # File uploader widget
-    uploaded_file = st.file_uploader("Upload your options chain Excel file", type=["xlsx"])
-
-    if uploaded_file is not None:
-        # Load and clean the data
-        calls_data, puts_data = load_data(uploaded_file)
-        
-        # Display the data
-        st.subheader("Data Preview")
-        st.write(calls_data.head())  # Preview the first few rows of Calls data
-        st.write(puts_data.head())   # Preview the first few rows of Puts data
-
-        # Call the plotting function for Gamma Exposure
-        plot_gamma_exposure(calls_data, puts_data)
-        
-        # Call the plotting function for 3D Gamma Exposure visualization
-        plot_3d_visualization(calls_data, puts_data)
-
-if __name__ == "__main__":
-    main()
