@@ -1,64 +1,118 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 import plotly.express as px
-import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.graph_objects as go
 
-# Function to clean columns (to convert values to numeric after removing unwanted characters like '%')
+# Function to clean the specified column by converting values to numeric, removing '%' symbols
 def clean_column(df, column_name):
     df[column_name] = df[column_name].astype(str).str.replace('%', '').apply(pd.to_numeric, errors='coerce')
     return df
 
-# Function to load and clean data
-def load_data(uploaded_file):
-    # Read the data
-    df_raw = pd.read_excel(uploaded_file, header=None)
-    headers = df_raw.iloc[0]
-    df = df_raw[1:]
-    df.columns = headers
-
-    # Clean specific columns
-    df = clean_column(df, "Gamma")
-    df = clean_column(df, "Impl Vol")
-    df = clean_column(df, "OI")
+# Load and clean data
+def load_data(file):
+    # Read the file with header at row 1 (index 0)
+    df = pd.read_excel(file, header=0)
     
-    return df
+    # Clean the necessary columns (converting data types and handling non-numeric characters)
+    df = clean_column(df, "Gamma")      # Clean Gamma column
+    df = clean_column(df, "Impl Vol")   # Clean Impl Vol column
+    df = clean_column(df, "Open.Int")   # Clean Open.Int column
+    df = clean_column(df, "Theta")      # Clean Theta column
+    df = clean_column(df, "Delta")      # Clean Delta column
+    df = clean_column(df, "Volume")     # Clean Volume column
+    df = clean_column(df, "Vega")       # Clean Vega column
+    df = clean_column(df, "BID")        # Clean BID column
+    df = clean_column(df, "ASK")        # Clean ASK column
+    df = clean_column(df, "Exp")        # Clean Exp column
+    df = clean_column(df, "Strike")     # Clean Strike column
 
-# Data upload
-uploaded_file = st.file_uploader("Upload Options Chain Excel File (.xlsx)", type="xlsx")
+    # Replace 'N/A' with 0 in the entire dataframe
+    df = df.replace('N/A', 0)
 
-if uploaded_file:
-    df = load_data(uploaded_file)
-    st.write("### Data Preview", df)
+    # Handling Calls (data for calls is on the left side of Strike)
+    calls = df.iloc[:, :11]  # Columns for calls (before the strike)
+    
+    # Handling Puts (data for puts is on the right side of Strike)
+    puts = df.iloc[:, 11:]   # Columns for puts (after the strike)
+    
+    return calls, puts
 
-    # Create visualizations
-    st.write("### Gamma Exposure by Strike")
-    fig = plt.figure(figsize=(8, 6))
-    sns.lineplot(data=df, x="Strike", y="Gamma")
-    plt.title("Gamma Exposure by Strike")
-    st.pyplot(fig)
+# Visualize Gamma Exposure by Strike
+def plot_gamma_exposure(calls, puts):
+    # Plot for Calls
+    fig_calls = px.line(calls, x='Strike', y='Gamma', title="Gamma Exposure by Strike (Calls)")
+    st.plotly_chart(fig_calls)
 
-    st.write("### Implied Volatility Surface")
-    fig2 = plt.figure(figsize=(8, 6))
-    sns.scatterplot(data=df, x="Strike", y="Impl Vol", size="OI", sizes=(10, 200), hue="OI", palette="viridis")
-    plt.title("Implied Volatility Surface")
-    st.pyplot(fig2)
+    # Plot for Puts
+    fig_puts = px.line(puts, x='Strike', y='Gamma', title="Gamma Exposure by Strike (Puts)")
+    st.plotly_chart(fig_puts)
 
-    # Gamma Flip visualization
-    st.write("### Gamma Flip Visualization")
-    gamma_flip = df[df["Gamma"] == df["Gamma"].min()]
-    st.write("Gamma Flip is at Strike:", gamma_flip["Strike"].values[0])
+# Visualize Implied Volatility Surface
+def plot_implied_volatility(calls, puts):
+    fig = px.scatter_3d(calls, x='Strike', y='Gamma', z='Impl Vol', title="Implied Volatility Surface (Calls)")
+    st.plotly_chart(fig)
 
-    # Multi-Dimensional 3D Visualization
-    st.write("### Multi-Dimensional 3D Visualization")
-    fig3 = px.scatter_3d(df, x='Strike', y='Gamma', z='Impl Vol', color='OI', size='OI', opacity=0.7)
-    fig3.update_layout(scene=dict(xaxis_title='Strike', yaxis_title='Gamma', zaxis_title='Impl Vol'))
-    st.plotly_chart(fig3)
+    fig_puts = px.scatter_3d(puts, x='Strike', y='Gamma', z='Impl Vol', title="Implied Volatility Surface (Puts)")
+    st.plotly_chart(fig_puts)
 
-    # Handle missing columns
-    if 'Impl Vol' not in df.columns:
-        st.error("Missing expected column: Impl Vol")
-    if 'OI' not in df.columns:
-        st.error("Missing expected column: OI")
-    if 'Gamma' not in df.columns:
-        st.error("Missing expected column: Gamma")
+# Visualize Gamma Flip
+def plot_gamma_flip(calls, strike_val=95):
+    gamma_flip = calls[calls['Strike'] == strike_val]
+    fig = px.scatter(gamma_flip, x='Strike', y='Gamma', title="Gamma Flip at Strike: " + str(strike_val))
+    st.plotly_chart(fig)
+
+# 3D Plotting for Gamma, Implied Volatility, and Open Int
+def plot_3d(calls):
+    fig = go.Figure(data=[go.Scatter3d(
+        x=calls['Strike'],
+        y=calls['Gamma'],
+        z=calls['Impl Vol'],
+        mode='markers',
+        marker=dict(
+            size=calls['Open.Int'],
+            color=calls['Open.Int'],
+            colorscale='Viridis',
+            opacity=0.8
+        )
+    )])
+    fig.update_layout(title="3D Gamma, Implied Volatility and Open Interest", scene=dict(
+                    xaxis_title='Strike',
+                    yaxis_title='Gamma',
+                    zaxis_title='Impl Vol'))
+    st.plotly_chart(fig)
+
+# Streamlit App Interface
+def main():
+    st.title("Options Gamma Dashboard")
+
+    # Upload Excel file
+    uploaded_file = st.file_uploader("Upload Options Chain Excel File", type=["xlsx"])
+
+    if uploaded_file is not None:
+        # Load data
+        calls_data, puts_data = load_data(uploaded_file)
+
+        # Display data
+        st.subheader("Raw Data")
+        st.write(calls_data.head())
+
+        # Plot Gamma Exposure by Strike
+        st.subheader("Gamma Exposure by Strike")
+        plot_gamma_exposure(calls_data, puts_data)
+
+        # Plot Implied Volatility Surface
+        st.subheader("Implied Volatility Surface")
+        plot_implied_volatility(calls_data, puts_data)
+
+        # Plot Gamma Flip (Can select strike)
+        st.subheader("Gamma Flip Visualization")
+        strike_val = st.slider("Select Strike Value for Gamma Flip", int(calls_data['Strike'].min()), int(calls_data['Strike'].max()), 95)
+        plot_gamma_flip(calls_data, strike_val)
+
+        # 3D Visualization
+        st.subheader("Multi-Dimensional 3D Visualization")
+        plot_3d(calls_data)
+
+# Run Streamlit app
+if __name__ == '__main__':
+    main()
